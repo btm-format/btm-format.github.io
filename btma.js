@@ -235,6 +235,119 @@ function parseBtm1Sync(payload) {
   return { defaultBpm, bpb, beatmarkers };
 }
 
+// ---------- Format detection and decoding ----------
+
+// Detect a still/animated image format from magic bytes.
+export function detectImageFormat(bytes) {
+  if (!bytes || bytes.length < 12) return 'unknown';
+  // GIF: "GIF87a" or "GIF89a"
+  if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return 'gif';
+  // WebP: "RIFF????WEBP"
+  if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+      bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) return 'webp';
+  // AVIF: "....ftypavif" or "....ftypavis" at offset 4
+  if (bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) {
+    const brand = String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]);
+    if (brand === 'avif' || brand === 'avis') return 'avif';
+  }
+  return 'unknown';
+}
+
+// Decode any animated image (GIF / WebP / AVIF). Returns the common shape
+// { frames: HTMLCanvasElement[], width, height, delays: number[] (ms) }.
+export async function decodeAnimatedImage(bytes) {
+  const fmt = detectImageFormat(bytes);
+  if (fmt === 'gif') return decodeGifFrames(bytes);
+  if (fmt === 'webp') return decodeWithImageDecoder(bytes, 'image/webp');
+  if (fmt === 'avif') return decodeWithImageDecoder(bytes, 'image/avif');
+  throw new Error(`Unsupported image format (magic bytes don't match GIF/WebP/AVIF)`);
+}
+
+// Decode WebP / AVIF / etc. using the browser's native ImageDecoder API.
+// Returns the same shape as decodeGifFrames.
+async function decodeWithImageDecoder(bytes, mimeType) {
+  if (typeof ImageDecoder === 'undefined') {
+    throw new Error('ImageDecoder API not available in this browser; cannot decode ' + mimeType);
+  }
+  const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  const decoder = new ImageDecoder({ data, type: mimeType });
+  await decoder.tracks.ready;
+  const track = decoder.tracks.selectedTrack;
+  const F = track.frameCount;
+  const composited = [];
+  const delays = [];
+  let W = 0, H = 0;
+  for (let i = 0; i < F; i++) {
+    const result = await decoder.decode({ frameIndex: i });
+    const image = result.image;
+    W = image.displayWidth;
+    H = image.displayHeight;
+    const canvas = document.createElement('canvas');
+    canvas.width = W;
+    canvas.height = H;
+    canvas.getContext('2d').drawImage(image, 0, 0);
+    composited.push(canvas);
+    // VideoFrame.duration is in microseconds; convert to ms. May be null.
+    delays.push(image.duration ? image.duration / 1000 : 100);
+    image.close();
+  }
+  decoder.close();
+  return { frames: composited, width: W, height: H, delays };
+}
+
+// Build BTMA renderer metadata + decoded frames from any animated image,
+// without the GIF-byte round-trip. beatSpec may be:
+//   - a number L (loop length in beats)
+//   - the string 'auto'
+//   - an object { count, bpb }  where bpb is real (e.g. 0.333), giving
+//     direct control over the schema's beats_per_beatmarker / beatmarker_count
+export async function prepareImageForRender(bytes, beatSpec) {
+  const decoded = await decodeAnimatedImage(bytes);
+  const F = decoded.frames.length;
+  if (F < 1) throw new Error('Image has no animation frames');
+  const totalMs = decoded.delays.reduce((a, b) => a + b, 0);
+  const originalLoopSeconds = totalMs / 1000;
+
+  let count, bpb, wasAuto = false;
+  if (beatSpec && typeof beatSpec === 'object') {
+    count = beatSpec.count | 0;
+    bpb = Math.round(beatSpec.bpb * 1000);
+    if (!count || count < 1) throw new Error(`Bad beat spec: count=${count}`);
+    if (bpb === 0 || bpb < -1000 || bpb > 1000) {
+      throw new Error(`Bad beat spec: bpb=${beatSpec.bpb} → ${bpb} (must be in [-1000,1000] excl 0)`);
+    }
+  } else {
+    let L = beatSpec;
+    if (L === 'auto') { L = autoDetectLoopBeats(originalLoopSeconds); wasAuto = true; }
+    const params = loopLengthToParams(L);
+    count = params.count;
+    bpb = params.bpb;
+  }
+  const bpbReal = Math.abs(bpb) / 1000;
+  const defaultBpm = Math.max(1, Math.min(0xFFFF,
+    Math.round(60 * count * bpbReal / originalLoopSeconds)
+  ));
+  const beatmarkers = [];
+  for (let i = 0; i < count; i++) beatmarkers.push((i * F) / count);
+
+  return {
+    frames: decoded.frames,
+    delays: decoded.delays,
+    width: decoded.width,
+    height: decoded.height,
+    meta: { defaultBpm, bpb, beatmarkers },
+    info: {
+      defaultBpm, bpb, beatmarkers,
+      frameCount: F,
+      frameDelays: decoded.delays,
+      totalLoopMs: totalMs,
+      sourceLoopSeconds: originalLoopSeconds,
+      autoDetected: wasAuto,
+      format: detectImageFormat(bytes),
+    },
+  };
+}
+
 // ---------- BTMA renderer ----------
 
 // Decode GIF frames into a canvas-ready frame buffer using gifuct-js,
@@ -391,6 +504,28 @@ export class BtmaRenderer {
     this.rafHandle = null;
   }
 
+  // Load from already-decoded data (any image format). Bypasses the BTMA
+  // byte round-trip used by loadBytes — useful for WebP/AVIF (which don't
+  // have a defined container profile yet) and for samples that specify
+  // explicit { count, bpb } metadata.
+  loadDecoded({ frames, delays, meta }, clock) {
+    this.frames = frames;
+    this.framesBySize = new Map();
+    this.delays = Array.isArray(delays) ? delays : [];
+    let total = this.delays.reduce((a, b) => a + b, 0);
+    if (!(total > 0) && this.frames.length > 0) {
+      this.delays = this.frames.map(() => 100);
+      total = this.delays.reduce((a, b) => a + b, 0);
+    }
+    this.totalLoopMs = total;
+    this.W = this.frames[0] ? this.frames[0].width : 0;
+    this.H = this.frames[0] ? this.frames[0].height : 0;
+    this.meta = meta;
+    this.clock = clock || new BeatClock(meta.defaultBpm);
+    this.startBeat = this.clock.beatsAt(performance.now());
+    if (!this.rafHandle) this._tick();
+  }
+
   async loadBytes(btmaBytes, clock) {
     const meta = parseBtma(btmaBytes);
     if (!meta) throw new Error('Bytes are not a valid BTMA file');
@@ -481,17 +616,27 @@ export class BtmaRenderer {
         let frameIdx;
         const now = performance.now();
         if (this.clock.bpm == null) {
-          // No external BPM source — fall back to GIF native frame delays
-          // (BTMA spec §5.2 non-aware playback semantics).
+          // No external BPM source — fall back to native frame delays. Walk
+          // them backward when bpb is negative so reverse-playback BTMAs
+          // keep their authored direction even without a live BPM.
           if (this.nativeStartMs == null) this.nativeStartMs = now;
           const total = this.totalLoopMs > 0 ? this.totalLoopMs : 1000;
           const raw = (now - this.nativeStartMs) % total;
           const elapsed = raw < 0 ? raw + total : raw;
+          const reverse = this.meta && this.meta.bpb < 0;
           let acc = 0;
-          frameIdx = this.delays.length - 1;
-          for (let i = 0; i < this.delays.length; i++) {
-            acc += this.delays[i];
-            if (elapsed < acc) { frameIdx = i; break; }
+          if (reverse) {
+            frameIdx = 0;
+            for (let i = this.delays.length - 1; i >= 0; i--) {
+              acc += this.delays[i];
+              if (elapsed < acc) { frameIdx = i; break; }
+            }
+          } else {
+            frameIdx = this.delays.length - 1;
+            for (let i = 0; i < this.delays.length; i++) {
+              acc += this.delays[i];
+              if (elapsed < acc) { frameIdx = i; break; }
+            }
           }
         } else {
           // BTMA-aware: clock has a live BPM, follow it.

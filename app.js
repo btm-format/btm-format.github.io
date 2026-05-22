@@ -7,7 +7,13 @@
 // just `track.bpm × audio.playbackRate`, which drives the BTMA renderer's
 // shared beat clock directly — no audio-based detection involved.
 
-import { gifToBtma, BtmaRenderer, BeatClock } from './btma.js';
+import {
+  gifToBtma,
+  prepareImageForRender,
+  detectImageFormat,
+  BtmaRenderer,
+  BeatClock,
+} from './btma.js';
 
 // Authored BPMs for the bundled tracks. The speed slider scales these.
 const TRACKS = [
@@ -20,10 +26,13 @@ const RENDER_SIZES = [28, 56, 112];
 const SAMPLE_RENDER_SIZES = [112];
 const MAX_UPLOAD_BYTES = 1024 * 1024; // 1 MB
 
-const SAMPLE_GIFS = [
-  { src: 'assets/sg_128.gif', label: 'sg_128.gif', beats: 1 },
-  { src: 'assets/heed.gif',   label: 'heed.gif',   beats: 1 },
-  { src: 'assets/rm_100.gif', label: 'rm_100.gif', beats: 2 },
+const SAMPLE_IMAGES = [
+  { src: 'assets/sg_128.gif',            label: 'sg_128.gif',            beats: 1 },
+  { src: 'assets/heed.gif',              label: 'heed.gif',              beats: 1 },
+  { src: 'assets/rm_100.gif',            label: 'rm_100.gif',            beats: 2 },
+  { src: 'assets/meowingtons.gif',       label: 'meowingtons.gif',       beats: 1 },
+  { src: 'assets/triplet_sample.webp',   label: 'triplet_sample.webp',   spec: { count: 3, bpb: 0.333 } },
+  { src: 'assets/septuplet_sample.webp', label: 'septuplet_sample.webp', spec: { count: 8, bpb: -0.875 } },
 ];
 
 // Speed slider range in BPM units around each track's nominal tempo.
@@ -146,7 +155,7 @@ function makeRenderRow(containerEl, sizes = RENDER_SIZES) {
 async function loadSamples() {
   const container = document.getElementById('samples-container');
   container.innerHTML = '';
-  for (const sample of SAMPLE_GIFS) {
+  for (const sample of SAMPLE_IMAGES) {
     const block = document.createElement('div');
     block.className = 'sample-block';
     const row = document.createElement('div');
@@ -159,16 +168,17 @@ async function loadSamples() {
     try {
       const resp = await fetch(sample.src);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const gifBytes = new Uint8Array(await resp.arrayBuffer());
-      const { bytes, metadata } = await gifToBtma(gifBytes, sample.beats);
-      console.log(`Sample ${sample.label}:`, metadata);
+      const bytes = new Uint8Array(await resp.arrayBuffer());
+      const beatSpec = sample.spec || sample.beats;
+      const prepared = await prepareImageForRender(bytes, beatSpec);
+      console.log(`Sample ${sample.label}:`, prepared.info);
       const renderer = new BtmaRenderer();
-      await renderer.loadBytes(bytes, sharedClock);
+      renderer.loadDecoded(prepared, sharedClock);
       for (const { canvas, size } of makeRenderRow(row, SAMPLE_RENDER_SIZES)) {
         renderer.addTarget(canvas, size);
       }
       status.className = 'status ok';
-      status.textContent = formatBtmaStatus(metadata);
+      status.textContent = formatBtmaStatus(prepared.info);
     } catch (e) {
       console.error(`Failed to load sample ${sample.label}:`, e);
       status.className = 'status error';
@@ -186,9 +196,9 @@ async function handleUpload(file, beatLength) {
   statusEl.textContent = '';
 
   if (!file) return;
-  if (!/\.gif$/i.test(file.name) && file.type !== 'image/gif') {
+  if (!/\.(gif|webp|avif)$/i.test(file.name) && !/^image\/(gif|webp|avif)$/.test(file.type)) {
     statusEl.className = 'status error';
-    statusEl.textContent = 'Please upload a .gif file.';
+    statusEl.textContent = 'Please upload a .gif, .webp, or .avif file.';
     return;
   }
   if (file.size > MAX_UPLOAD_BYTES) {
@@ -198,16 +208,16 @@ async function handleUpload(file, beatLength) {
   }
 
   try {
-    const gifBytes = new Uint8Array(await file.arrayBuffer());
-    const { bytes, metadata } = await gifToBtma(gifBytes, beatLength);
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const prepared = await prepareImageForRender(bytes, beatLength);
     statusEl.className = 'status ok';
-    statusEl.textContent = formatBtmaStatus(metadata);
+    statusEl.textContent = formatBtmaStatus(prepared.info);
     document.getElementById('upload-label').textContent =
-      'Your uploaded GIF, converted to a BTMA.';
+      `Your uploaded ${prepared.info.format.toUpperCase()}, converted to a BTMA.`;
 
     if (uploadRenderer) uploadRenderer.dispose();
     uploadRenderer = new BtmaRenderer();
-    await uploadRenderer.loadBytes(bytes, sharedClock);
+    uploadRenderer.loadDecoded(prepared, sharedClock);
     const row = document.getElementById('upload-render');
     for (const { canvas, size } of makeRenderRow(row)) {
       uploadRenderer.addTarget(canvas, size);
