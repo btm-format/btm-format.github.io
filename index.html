@@ -1,0 +1,74 @@
+<!doctype html>
+<!--
+  BTMA demo page. Apache-2.0.
+  See ../.clone/spec/BTM1Sync-schema-v0.2.md and BTMA-spec-v0.2.md.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>BTMA demo</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>BTMA — Beat-Tracking Media (Animation) demo</h1>
+    <p>
+      A demonstration of the v0.2 BTMA file format: GIFs that retempo themselves in
+      real time to match accompanying music. Pick a track below; the detected BPM
+      drives the renderers underneath.
+    </p>
+  </header>
+
+  <section id="audio-section">
+    <h2>Music</h2>
+    <p class="hint">
+      Click play on any track. Playing one stops the others. Nothing autoplays.
+      Each track's BPM slider scales playback like DJ software — pitch stays
+      constant as tempo changes. The BTMA renderers below sync to the active
+      track's effective BPM.
+    </p>
+    <ul id="players"></ul>
+    <p id="bpm-readout"><span id="bpm-value">—</span> bpm</p>
+  </section>
+
+  <div class="btma-grid">
+    <section id="sample-section">
+      <h2>Sample BTMAs</h2>
+      <p class="hint">Standard GIF files auto-converted to 1&nbsp;beat long&nbsp;.BTMAs</p>
+      <div id="samples-container"></div>
+    </section>
+
+    <section id="upload-section">
+      <h2>Your own BTMA</h2>
+      <p class="hint" id="upload-label">Upload a&nbsp;.gif file below to convert it to a&nbsp;BTMA.</p>
+      <div class="render-row" id="upload-render"></div>
+      <div class="upload-controls">
+        <label>GIF file: <input id="gif-input" type="file" accept="image/gif"></label>
+        <label>Beats per loop:
+          <select id="beat-length">
+            <option value="0.5">0.5</option>
+            <option value="1" selected>1</option>
+            <option value="2">2</option>
+          </select>
+        </label>
+      </div>
+      <p id="upload-status" class="status"></p>
+      <div class="instructions">
+        <p><strong>Instructions:</strong></p>
+        <ol>
+          <li>Pick a <code>.gif</code> file from your computer.</li>
+          <li>Use the dropdown to declare how many beats long the loop is.</li>
+          <li>Press a play button above to start music. Your GIF will sync to the active track's tempo.</li>
+        </ol>
+        <p><strong>Limits:</strong> max file size <strong>1&nbsp;MB</strong> (Twitch's animated-emote cap). The file is rendered at <strong>28×28, 56×56, and 112×112</strong> — the three Twitch emote sizes. Non-square GIFs are letterboxed with black bars; resolution is otherwise not validated.</p>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    <p>BTMA v0.2 spec at <a href="https://github.com/btm-format/spec">github.com/btm-format/spec</a>. Demo code Apache-2.0.</p>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

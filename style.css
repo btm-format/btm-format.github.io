@@ -1,0 +1,195 @@
+/* BTMA demo styles. Apache-2.0. */
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  max-width: 960px;
+  margin: 2rem auto;
+  padding: 0 1.25rem 3rem;
+  color: #1a1a1a;
+  line-height: 1.5;
+  background: #fafafa;
+}
+
+h1 { font-size: 1.65rem; margin-bottom: 0.25rem; letter-spacing: -0.01em; }
+h2 {
+  font-size: 1.1rem;
+  margin-top: 0;
+  border-bottom: 1px solid #ddd;
+  padding-bottom: 0.35rem;
+}
+
+body > section + section, .btma-grid { margin-top: 2rem; }
+
+header p { color: #555; margin-top: 0.5rem; }
+
+.btma-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+.btma-grid > section {
+  background: #fff;
+  border: 1px solid #e1e1e1;
+  border-radius: 8px;
+  padding: 1rem 1.1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+}
+.btma-grid .render-row { margin: 0.25rem 0 0.5rem; }
+.btma-grid .hint { margin-top: 0; }
+
+#samples-container {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+.sample-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  position: relative;
+}
+.sample-block:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: calc(-0.375rem - 0.5px);  /* centered in the 0.75rem grid gap */
+  width: 1px;
+  background: #e0e0e0;
+}
+.sample-block .render-row {
+  margin: 0;
+  min-height: 0;
+  justify-content: center;
+}
+.sample-block .status, #upload-status {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 0.7rem;
+  margin: 0;
+  text-align: left;
+  white-space: pre-line;
+  line-height: 1.35;
+  align-self: stretch;
+}
+.sample-block .status { min-height: 0; }
+.sample-block .render-row figcaption { display: none; }
+
+#audio-section {
+  background: #fff;
+  border: 1px solid #e1e1e1;
+  border-radius: 8px;
+  padding: 0.9rem 1.1rem 1rem;
+}
+#audio-section .hint { margin-top: 0.1rem; margin-bottom: 0.6rem; }
+
+@media (max-width: 720px) {
+  .btma-grid { grid-template-columns: 1fr; }
+}
+
+.hint { color: #666; font-size: 0.9rem; }
+
+.status {
+  font-size: 0.9rem;
+  min-height: 1.4em;
+}
+.status.error { color: #b00020; }
+.status.ok { color: #0a7d2a; }
+
+#players { list-style: none; padding: 0; margin: 0; }
+#players li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.15rem 0;
+  flex-wrap: wrap;
+}
+#players .track-name { width: 6rem; flex-shrink: 0; }
+#players audio { flex: 1; min-width: 14rem; max-width: 100%; }
+.speed-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+.speed-control input[type=range] { width: 6rem; }
+.speed-label {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+  color: #444;
+  width: 4.5rem;
+  text-align: right;
+}
+
+#bpm-readout {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.1rem;
+  margin: 0.9rem auto 0.1rem;
+  padding: 3px;
+  background: #000;
+  color: #fff;
+  border-radius: 6px;
+  display: block;
+  width: max-content;
+  text-align: center;
+}
+#bpm-value { font-weight: 600; color: #fff; }
+
+.render-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin: 0.5rem 0;
+  min-height: 140px;
+}
+.render-row figure {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+.render-row canvas {
+  background: #000;
+  display: block;
+  image-rendering: pixelated;
+}
+.render-row figcaption {
+  font-size: 0.8rem;
+  color: #555;
+}
+
+.instructions {
+  background: #f4f4f4;
+  border-left: 3px solid #999;
+  padding: 0.55rem 0.85rem;
+  margin: 0.75rem 0 0;
+  font-size: 0.88rem;
+  color: #333;
+}
+.instructions p { margin: 0.35rem 0; }
+.instructions ol { margin: 0.25rem 0 0.45rem 1.2rem; padding: 0; }
+
+.upload-controls {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0.4rem 0;
+  font-size: 0.9rem;
+}
+.upload-controls input[type=file] { font-size: 0.85rem; }
+
+footer {
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid #ddd;
+  font-size: 0.85rem;
+  color: #666;
+}
