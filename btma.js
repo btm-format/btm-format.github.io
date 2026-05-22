@@ -84,8 +84,34 @@ export function loopLengthToParams(L) {
   return { count, bpb: Math.round((L / count) * 1000) };
 }
 
+// Infer the most plausible beat-count for a GIF given its total loop duration
+// in seconds. Tries the common loop-length candidates and picks whichever
+// produces a BPM closest to a dance-music sweet spot (~125 BPM by default),
+// preferring values that fall inside [80, 200] BPM.
+//
+// When a known reference BPM is available (e.g. from the active stream's
+// broadcast tempo), pass it as `referenceBpm` and detection becomes nearly
+// unambiguous.
+export function autoDetectLoopBeats(loopSeconds, { referenceBpm = null, target = 125 } = {}) {
+  if (!(loopSeconds > 0)) return 1;
+  const candidates = [0.5, 1, 2, 4, 8];
+  const targetBpm = referenceBpm || target;
+  let bestN = 1;
+  let bestScore = Infinity;
+  for (const n of candidates) {
+    const bpm = (60 * n) / loopSeconds;
+    const inRange = bpm >= 80 && bpm <= 200;
+    // Smaller is better. Out-of-range candidates take a large penalty so
+    // they only win when nothing fits.
+    const score = (inRange ? 0 : 1000) + Math.abs(bpm - targetBpm);
+    if (score < bestScore) { bestScore = score; bestN = n; }
+  }
+  return bestN;
+}
+
 // Convert an existing GIF byte stream into a BTMA byte stream, per BTMA §7.1.
-// loopLengthBeats: user-declared loop length in beats (e.g. 0.5, 1, 2).
+// loopLengthBeats: user-declared loop length in beats (e.g. 0.5, 1, 2), OR
+// the string 'auto' to infer it from the GIF's frame timing.
 // Returns Uint8Array of BTMA bytes and the metadata used.
 export async function gifToBtma(gifBytes, loopLengthBeats) {
   // Parse frames to count F and total duration.
@@ -94,9 +120,15 @@ export async function gifToBtma(gifBytes, loopLengthBeats) {
   const F = frames.length;
   if (F < 1) throw new Error('GIF has no frames');
   // Sum delays. gifuct-js delivers `delay` in milliseconds.
-  let totalMs = 0;
-  for (const f of frames) totalMs += (f.delay && f.delay > 0) ? f.delay : 10; // 10ms fallback if missing
+  const frameDelays = frames.map(f => (f.delay && f.delay > 0) ? f.delay : 10);
+  const totalMs = frameDelays.reduce((a, b) => a + b, 0);
   const originalLoopSeconds = totalMs / 1000;
+
+  // If 'auto', infer the beat count from the loop duration.
+  const wasAuto = (loopLengthBeats === 'auto');
+  if (wasAuto) {
+    loopLengthBeats = autoDetectLoopBeats(originalLoopSeconds);
+  }
 
   const { count, bpb } = loopLengthToParams(loopLengthBeats);
   const bpbReal = Math.abs(bpb) / 1000;
@@ -117,7 +149,15 @@ export async function gifToBtma(gifBytes, loopLengthBeats) {
 
   return {
     bytes: out,
-    metadata: { defaultBpm, bpb, beatmarkers, frameCount: F, sourceLoopSeconds: originalLoopSeconds },
+    metadata: {
+      defaultBpm, bpb, beatmarkers,
+      frameCount: F,
+      frameDelays,                 // per-frame delays in ms
+      totalLoopMs: totalMs,
+      sourceLoopSeconds: originalLoopSeconds,
+      autoDetected: wasAuto,
+      detectedBeats: loopLengthBeats,
+    },
   };
 }
 
@@ -256,6 +296,48 @@ async function decodeGifFrames(gifBytes) {
   return { frames: composited, width: W, height: H, delays };
 }
 
+// Scale a full-size frame canvas down to a target square size, letterboxed
+// with black bars when the source isn't square. Uses iterative half-step
+// bilinear downscaling — significantly sharper than a single drawImage
+// call at large size reductions (which uses a small filter kernel).
+function scaleFrameLetterboxed(src, targetSize) {
+  const sw = src.width;
+  const sh = src.height;
+  const scale = Math.min(targetSize / sw, targetSize / sh);
+  const dw = Math.max(1, Math.round(sw * scale));
+  const dh = Math.max(1, Math.round(sh * scale));
+
+  // Halve repeatedly until we're within 2× of the final scaled dims.
+  let current = src;
+  let cw = sw;
+  let ch = sh;
+  while (cw > dw * 2 && ch > dh * 2) {
+    cw = Math.max(1, Math.floor(cw / 2));
+    ch = Math.max(1, Math.floor(ch / 2));
+    const tmp = document.createElement('canvas');
+    tmp.width = cw;
+    tmp.height = ch;
+    const tctx = tmp.getContext('2d');
+    tctx.imageSmoothingEnabled = true;
+    tctx.imageSmoothingQuality = 'high';
+    tctx.drawImage(current, 0, 0, cw, ch);
+    current = tmp;
+  }
+
+  const out = document.createElement('canvas');
+  out.width = targetSize;
+  out.height = targetSize;
+  const octx = out.getContext('2d');
+  octx.fillStyle = '#000';
+  octx.fillRect(0, 0, targetSize, targetSize);
+  octx.imageSmoothingEnabled = true;
+  octx.imageSmoothingQuality = 'high';
+  const dx = Math.floor((targetSize - dw) / 2);
+  const dy = Math.floor((targetSize - dh) / 2);
+  octx.drawImage(current, dx, dy, dw, dh);
+  return out;
+}
+
 // A BeatClock provides musical time (in beats) given a real time. External
 // controllers can set the current BPM at any moment; the clock updates
 // continuously without phase jumps. Setting BPM to null signals "no external
@@ -294,7 +376,9 @@ export class BeatClock {
 // BPM is supplied via a BeatClock (which may be driven externally).
 export class BtmaRenderer {
   constructor() {
-    this.frames = null;          // composited frame canvases
+    this.frames = null;          // full-size composited frame canvases
+    this.framesBySize = null;    // Map<targetSize, scaledFrameCanvas[]> —
+                                 // pre-rendered letterboxed versions
     this.delays = null;          // per-frame delays in ms (native-fallback)
     this.totalLoopMs = 0;
     this.W = 0;
@@ -312,6 +396,7 @@ export class BtmaRenderer {
     if (!meta) throw new Error('Bytes are not a valid BTMA file');
     const decoded = await decodeGifFrames(btmaBytes);
     this.frames = decoded.frames;
+    this.framesBySize = new Map();
     this.delays = Array.isArray(decoded.delays) ? decoded.delays : [];
     // Guarantee a positive loop length. If the GIF has zero or missing delays
     // we synthesise 100 ms per frame so the renderer still advances.
@@ -321,6 +406,12 @@ export class BtmaRenderer {
       total = this.delays.reduce((a, b) => a + b, 0);
     }
     this.totalLoopMs = total;
+    console.log(
+      `[btma] loaded ${this.frames.length} frames, ` +
+      `delays=[${this.delays.slice(0, 8).join(',')}${this.delays.length > 8 ? '…' : ''}], ` +
+      `totalLoopMs=${this.totalLoopMs}, ` +
+      `meta=${JSON.stringify({ defaultBpm: meta.defaultBpm, bpb: meta.bpb, beatmarkers: meta.beatmarkers })}`
+    );
     this.W = decoded.width;
     this.H = decoded.height;
     this.meta = meta;
@@ -329,11 +420,18 @@ export class BtmaRenderer {
     if (!this.rafHandle) this._tick();
   }
 
-  // Add a target canvas at a given square size (28/56/112). The canvas will be
-  // sized and the renderer will draw the current frame letterboxed if needed.
+  // Add a target canvas at a given square size (28/56/112). The first time a
+  // given size is requested we pre-render every frame at that size using
+  // iterative half-step downscaling and letterboxing, then cache. Per-tick
+  // drawing is then a 1:1 blit — fast and much higher visual quality than
+  // single-step downsampling every frame.
   addTarget(canvas, size) {
     canvas.width = size;
     canvas.height = size;
+    if (!this.framesBySize.has(size) && this.frames) {
+      const scaled = this.frames.map((f) => scaleFrameLetterboxed(f, size));
+      this.framesBySize.set(size, scaled);
+    }
     this.targets.push({ canvas, ctx: canvas.getContext('2d'), size });
   }
 
@@ -408,10 +506,16 @@ export class BtmaRenderer {
           frameIdx = Math.floor(pos) % this.frames.length;
           if (frameIdx < 0) frameIdx += this.frames.length;
         }
-        const src = this.frames[frameIdx];
-        if (src) {
+        if (this.frames[frameIdx]) {
           for (const t of this.targets) {
-            this._drawLetterboxed(t.ctx, src, t.size);
+            const cached = this.framesBySize.get(t.size);
+            const src = cached ? cached[frameIdx] : this.frames[frameIdx];
+            if (cached) {
+              // Pre-scaled, letterboxed; just blit 1:1.
+              t.ctx.drawImage(src, 0, 0);
+            } else {
+              this._drawLetterboxed(t.ctx, src, t.size);
+            }
           }
         }
       }

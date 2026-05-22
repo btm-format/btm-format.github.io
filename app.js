@@ -108,6 +108,26 @@ function setActiveBpm(bpm) {
   sharedClock.setBpm(bpm);
 }
 
+function formatBtmaStatus(metadata) {
+  const delays = metadata.frameDelays || [];
+  const allSame = delays.length > 0 && delays.every(d => d === delays[0]);
+  const delayStr = allSame ? `${delays[0]} ms` : 'varied';
+  const totalMs = metadata.totalLoopMs;
+  const totalStr = totalMs >= 1000
+    ? `${(totalMs / 1000).toFixed(3)} s`
+    : `${totalMs} ms`;
+  const n = metadata.beatmarkers.length;
+  return (
+    `${metadata.autoDetected ? 'Auto-converted' : 'Converted'}:\n` +
+    `${metadata.frameCount} frames\n` +
+    `Frame delay: ${delayStr}\n` +
+    `Total loop time: ${totalStr}\n` +
+    `default ${metadata.defaultBpm} BPM\n` +
+    `${n} beatmarker${n === 1 ? '' : 's'}\n` +
+    `${(metadata.bpb / 1000).toFixed(3)} beats per beatmarker`
+  );
+}
+
 function makeRenderRow(containerEl, sizes = RENDER_SIZES) {
   containerEl.innerHTML = '';
   const canvases = [];
@@ -148,13 +168,7 @@ async function loadSamples() {
         renderer.addTarget(canvas, size);
       }
       status.className = 'status ok';
-      const n = metadata.beatmarkers.length;
-      status.textContent =
-        `Converted:\n` +
-        `${metadata.frameCount} frames\n` +
-        `default ${metadata.defaultBpm} BPM\n` +
-        `${n} beatmarker${n === 1 ? '' : 's'}\n` +
-        `${(metadata.bpb / 1000).toFixed(3)} beats per beatmarker`;
+      status.textContent = formatBtmaStatus(metadata);
     } catch (e) {
       console.error(`Failed to load sample ${sample.label}:`, e);
       status.className = 'status error';
@@ -187,13 +201,7 @@ async function handleUpload(file, beatLength) {
     const gifBytes = new Uint8Array(await file.arrayBuffer());
     const { bytes, metadata } = await gifToBtma(gifBytes, beatLength);
     statusEl.className = 'status ok';
-    const n = metadata.beatmarkers.length;
-    statusEl.textContent =
-      `Converted:\n` +
-      `${metadata.frameCount} frames\n` +
-      `default ${metadata.defaultBpm} BPM\n` +
-      `${n} beatmarker${n === 1 ? '' : 's'}\n` +
-      `${(metadata.bpb / 1000).toFixed(3)} beats per beatmarker`;
+    statusEl.textContent = formatBtmaStatus(metadata);
     document.getElementById('upload-label').textContent =
       'Your uploaded GIF, converted to a BTMA.';
 
@@ -216,7 +224,8 @@ function bindUploadControls() {
   const sel = document.getElementById('beat-length');
   const trigger = () => {
     const f = input.files && input.files[0];
-    if (f) handleUpload(f, parseFloat(sel.value));
+    const v = sel.value === 'auto' ? 'auto' : parseFloat(sel.value);
+    if (f) handleUpload(f, v);
   };
   input.addEventListener('change', trigger);
   sel.addEventListener('change', trigger);

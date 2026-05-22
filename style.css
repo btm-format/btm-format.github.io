@@ -69,7 +69,7 @@ header p { color: #555; margin-top: 0.5rem; }
 }
 .sample-block .status, #upload-status {
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
-  font-size: 0.7rem;
+  font-size: 10px;
   margin: 0;
   text-align: left;
   white-space: pre-line;
