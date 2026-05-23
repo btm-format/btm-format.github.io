@@ -20,25 +20,82 @@ h2 {
   padding-bottom: 0.35rem;
 }
 
-body > section + section, .btma-grid { margin-top: 2rem; }
+body > section + section, body > div + section, .main-grid { margin-top: 1.25rem; }
 
 header p { color: #555; margin-top: 0.5rem; }
 
-.btma-grid {
+/* Tetris-piece layout:
+     ┌───────┬───────┐
+     │ MUSIC │       │
+     ├───────┤ SAMPL │
+     │ UPHEAD│       │
+     ├───────┴───────┤
+     │   UPLOAD BODY │
+     └───────────────┘
+   upload-head + upload-body share a background and have suppressed seam
+   borders so they read as one continuous L-shaped upload card. */
+.main-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 1.5rem;
+  grid-template-areas:
+    "music   samples"
+    "uphead  samples"
+    "upbody  upbody";
+  column-gap: 1.25rem;
+  row-gap: 0;
+  align-items: start;
 }
-.btma-grid > section {
+#audio-section   { grid-area: music; }
+#sample-section  { grid-area: samples; margin-bottom: 1.25rem; }
+#upload-head     { grid-area: uphead; margin-top: 1.25rem; }
+#upload-body     { grid-area: upbody; }
+
+#audio-section, #sample-section, #upload-head, #upload-body {
   background: #fff;
   border: 1px solid #e1e1e1;
-  border-radius: 8px;
-  padding: 1rem 1.1rem 1.1rem;
   display: flex;
   flex-direction: column;
 }
-.btma-grid .render-row { margin: 0.25rem 0 0.5rem; }
-.btma-grid .hint { margin-top: 0; }
+#audio-section, #sample-section { border-radius: 8px; padding: 0.9rem 1.1rem 1rem; }
+
+/* Upload head: rounded top corners only, no bottom border so it seams
+   invisibly into upload body. */
+#upload-head {
+  border-radius: 8px 8px 0 0;
+  border-bottom: none;
+  padding: 0.9rem 1.1rem 0.7rem;
+}
+#upload-head .hint { margin-top: 0; }
+
+/* Upload body: square top-left (continuation of upload head), rounded
+   bottom corners, no top border so it seams invisibly into upload head. */
+#upload-body {
+  border-radius: 0 8px 8px 8px;
+  border-top: none;
+  padding: 0.9rem 1.1rem 1.1rem;
+  position: relative;
+}
+/* Fake rounded inner corner of the L. A small white square sits in the
+   column gap above upbody, with its top-right corner border-radius'd so
+   the curve smooths the L's bend from uphead's right side into upbody's
+   top. Borders match uphead's right border so it looks like a continuation. */
+#upload-body::before {
+  content: '';
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  bottom: 100%;
+  left: calc(50% - 0.625rem - 1px);  /* right edge of left column,
+                                        nudged 1px left to overlap uphead's
+                                        right border for a seamless join */
+  background: #fff;
+  border-top-right-radius: 10px;
+  border-top: 1px solid #e1e1e1;
+  border-right: 1px solid #e1e1e1;
+}
+
+.main-grid .render-row { margin: 0.25rem 0 0.5rem; }
+.main-grid .hint { margin-top: 0; }
 
 #samples-container {
   display: grid;
@@ -71,7 +128,7 @@ header p { color: #555; margin-top: 0.5rem; }
 }
 .sample-block .status, #upload-status {
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
-  font-size: 10px;
+  font-size: 9px;
   margin: 0;
   text-align: left;
   white-space: pre-line;
@@ -81,16 +138,16 @@ header p { color: #555; margin-top: 0.5rem; }
 .sample-block .status { min-height: 0; }
 .sample-block .render-row figcaption { display: none; }
 
-#audio-section {
-  background: #fff;
-  border: 1px solid #e1e1e1;
-  border-radius: 8px;
-  padding: 0.9rem 1.1rem 1rem;
-}
 #audio-section .hint { margin-top: 0.1rem; margin-bottom: 0.6rem; }
 
 @media (max-width: 720px) {
-  .btma-grid { grid-template-columns: 1fr; }
+  .main-grid {
+    grid-template-columns: 1fr;
+    grid-template-areas: "music" "samples" "uphead" "upbody";
+  }
+  #sample-section { margin-bottom: 0; }
+  #upload-head    { margin-top: 0; border-radius: 8px 8px 0 0; }
+  #upload-body    { border-radius: 0 0 8px 8px; }
 }
 
 .hint { color: #666; font-size: 0.9rem; }

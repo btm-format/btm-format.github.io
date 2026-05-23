@@ -235,6 +235,42 @@ function parseBtm1Sync(payload) {
   return { defaultBpm, bpb, beatmarkers };
 }
 
+// Walk the WebP RIFF byte stream, locate the BTMS chunk, and parse its
+// payload as a BTM1Sync block. Returns null if not found / invalid.
+export function parseBtmw(bytes) {
+  if (!bytes || bytes.length < 12) return null;
+  // Verify WebP signature.
+  if (!(bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+        bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50)) {
+    return null;
+  }
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let p = 12;
+  while (p + 8 <= bytes.length) {
+    const fc = String.fromCharCode(bytes[p], bytes[p + 1], bytes[p + 2], bytes[p + 3]);
+    const size = dv.getUint32(p + 4, true);    // little-endian per RIFF
+    const payloadStart = p + 8;
+    const payloadEnd = payloadStart + size;
+    if (payloadEnd > bytes.length) return null;
+    if (fc === 'BTMS') {
+      const payload = bytes.subarray(payloadStart, payloadEnd);
+      return parseBtm1Sync(payload);
+    }
+    p = payloadEnd + (size & 1);               // skip pad byte if odd
+  }
+  return null;
+}
+
+// Try to extract embedded BTM1Sync metadata from a file in any supported
+// container format. Returns the parsed metadata object on success, null
+// when no embedded BTM1Sync block is found or the format isn't supported.
+export function tryParseEmbeddedBtm1Sync(bytes) {
+  const fmt = detectImageFormat(bytes);
+  if (fmt === 'gif') return parseBtma(bytes);
+  if (fmt === 'webp') return parseBtmw(bytes);
+  return null;
+}
+
 // ---------- Format detection and decoding ----------
 
 // Detect a still/animated image format from magic bytes.
@@ -308,27 +344,39 @@ export async function prepareImageForRender(bytes, beatSpec) {
   const totalMs = decoded.delays.reduce((a, b) => a + b, 0);
   const originalLoopSeconds = totalMs / 1000;
 
-  let count, bpb, wasAuto = false;
-  if (beatSpec && typeof beatSpec === 'object') {
-    count = beatSpec.count | 0;
-    bpb = Math.round(beatSpec.bpb * 1000);
-    if (!count || count < 1) throw new Error(`Bad beat spec: count=${count}`);
-    if (bpb === 0 || bpb < -1000 || bpb > 1000) {
-      throw new Error(`Bad beat spec: bpb=${beatSpec.bpb} → ${bpb} (must be in [-1000,1000] excl 0)`);
-    }
+  // If the file already carries authored BTM1Sync metadata, that takes
+  // precedence over whatever the caller's beatSpec would have inferred.
+  const embedded = tryParseEmbeddedBtm1Sync(bytes);
+
+  let count, bpb, wasAuto = false, defaultBpm, beatmarkers;
+
+  if (embedded) {
+    count = embedded.beatmarkers.length;
+    bpb = embedded.bpb;
+    defaultBpm = embedded.defaultBpm;
+    beatmarkers = embedded.beatmarkers.slice();
   } else {
-    let L = beatSpec;
-    if (L === 'auto') { L = autoDetectLoopBeats(originalLoopSeconds); wasAuto = true; }
-    const params = loopLengthToParams(L);
-    count = params.count;
-    bpb = params.bpb;
+    if (beatSpec && typeof beatSpec === 'object') {
+      count = beatSpec.count | 0;
+      bpb = Math.round(beatSpec.bpb * 1000);
+      if (!count || count < 1) throw new Error(`Bad beat spec: count=${count}`);
+      if (bpb === 0 || bpb < -1000 || bpb > 1000) {
+        throw new Error(`Bad beat spec: bpb=${beatSpec.bpb} → ${bpb} (must be in [-1000,1000] excl 0)`);
+      }
+    } else {
+      let L = beatSpec;
+      if (L === 'auto') { L = autoDetectLoopBeats(originalLoopSeconds); wasAuto = true; }
+      const params = loopLengthToParams(L);
+      count = params.count;
+      bpb = params.bpb;
+    }
+    const bpbReal = Math.abs(bpb) / 1000;
+    defaultBpm = Math.max(1, Math.min(0xFFFF,
+      Math.round(60 * count * bpbReal / originalLoopSeconds)
+    ));
+    beatmarkers = [];
+    for (let i = 0; i < count; i++) beatmarkers.push((i * F) / count);
   }
-  const bpbReal = Math.abs(bpb) / 1000;
-  const defaultBpm = Math.max(1, Math.min(0xFFFF,
-    Math.round(60 * count * bpbReal / originalLoopSeconds)
-  ));
-  const beatmarkers = [];
-  for (let i = 0; i < count; i++) beatmarkers.push((i * F) / count);
 
   return {
     frames: decoded.frames,
@@ -343,6 +391,7 @@ export async function prepareImageForRender(bytes, beatSpec) {
       totalLoopMs: totalMs,
       sourceLoopSeconds: originalLoopSeconds,
       autoDetected: wasAuto,
+      fromEmbedded: !!embedded,
       format: detectImageFormat(bytes),
     },
   };

@@ -30,7 +30,7 @@ const SAMPLE_IMAGES = [
   { src: 'assets/sg_128.gif',            label: 'sg_128.gif',            beats: 1 },
   { src: 'assets/heed.gif',              label: 'heed.gif',              beats: 1 },
   { src: 'assets/rm_100.gif',            label: 'rm_100.gif',            beats: 2 },
-  { src: 'assets/meowingtons.gif',       label: 'meowingtons.gif',       beats: 1 },
+  { src: 'assets/meowingtons.btma',      label: 'meowingtons.btma' },
   { src: 'assets/triplet_sample.webp',   label: 'triplet_sample.webp',   spec: { count: 3, bpb: 0.333 } },
   { src: 'assets/septuplet_sample.webp', label: 'septuplet_sample.webp', spec: { count: 8, bpb: -0.875 } },
 ];
@@ -126,8 +126,12 @@ function formatBtmaStatus(metadata) {
     ? `${(totalMs / 1000).toFixed(3)} s`
     : `${totalMs} ms`;
   const n = metadata.beatmarkers.length;
+  const fmt = (metadata.format || '').toUpperCase();
+  const lead = metadata.fromEmbedded
+    ? 'Loaded (embedded)'
+    : `${metadata.autoDetected ? 'Auto-converted' : 'Converted'} from ${fmt}`;
   return (
-    `${metadata.autoDetected ? 'Auto-converted' : 'Converted'}:\n` +
+    `${lead}:\n` +
     `${metadata.frameCount} frames\n` +
     `Frame delay: ${delayStr}\n` +
     `Total loop time: ${totalStr}\n` +
@@ -196,9 +200,9 @@ async function handleUpload(file, beatLength) {
   statusEl.textContent = '';
 
   if (!file) return;
-  if (!/\.(gif|webp|avif)$/i.test(file.name) && !/^image\/(gif|webp|avif)$/.test(file.type)) {
+  if (!/\.(gif|webp|avif|btma|btmw|btmi)$/i.test(file.name) && !/^image\/(gif|webp|avif)$/.test(file.type)) {
     statusEl.className = 'status error';
-    statusEl.textContent = 'Please upload a .gif, .webp, or .avif file.';
+    statusEl.textContent = 'Please upload a .gif, .webp, .avif, .btma, .btmw, or .btmi file.';
     return;
   }
   if (file.size > MAX_UPLOAD_BYTES) {
@@ -212,8 +216,16 @@ async function handleUpload(file, beatLength) {
     const prepared = await prepareImageForRender(bytes, beatLength);
     statusEl.className = 'status ok';
     statusEl.textContent = formatBtmaStatus(prepared.info);
-    document.getElementById('upload-label').textContent =
-      `Your uploaded ${prepared.info.format.toUpperCase()}, converted to a BTMA.`;
+    const uploadLabel = document.getElementById('upload-label');
+    const beatLengthLabel = document.getElementById('beat-length-label');
+    if (prepared.info.fromEmbedded) {
+      uploadLabel.textContent = 'Native BTMA uploaded.';
+      beatLengthLabel.hidden = true;
+    } else {
+      uploadLabel.textContent =
+        `Your uploaded ${prepared.info.format.toUpperCase()}, converted to a BTMA.`;
+      beatLengthLabel.hidden = false;
+    }
 
     if (uploadRenderer) uploadRenderer.dispose();
     uploadRenderer = new BtmaRenderer();

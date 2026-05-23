@@ -19,32 +19,30 @@
     </p>
   </header>
 
-  <section id="audio-section">
-    <h2>Music</h2>
-    <p class="hint">
-      Click play on any track. Playing one stops the others. Nothing autoplays.
-      Each track's BPM slider scales playback like DJ software — pitch stays
-      constant as tempo changes. The BTMA renderers below sync to the active
-      track's effective BPM.
-    </p>
-    <ul id="players"></ul>
-    <p id="bpm-readout"><span id="bpm-value">—</span> bpm</p>
-  </section>
+  <div class="main-grid">
+    <section id="audio-section">
+      <h2>Music</h2>
+      <p class="hint">Push play and watch the BTMA renderer sync the playback of the sample files to the track's BPM. Try using each track's tempo controls as well.</p>
+      <ul id="players"></ul>
+      <p id="bpm-readout"><span id="bpm-value">—</span> bpm</p>
+    </section>
 
-  <div class="btma-grid">
     <section id="sample-section">
       <h2>Sample BTMAs</h2>
-      <p class="hint">Standard GIF files auto-converted to 1&nbsp;beat long&nbsp;.BTMAs</p>
+      <p class="hint">Samples exercising different BTMA features: source formats (GIF, WebP, native .btma), variable beatmarker counts, fractional beatmarker sizes, and reverse playback.</p>
       <div id="samples-container"></div>
     </section>
 
-    <section id="upload-section">
+    <section id="upload-head">
       <h2>Your own BTMA</h2>
-      <p class="hint" id="upload-label">Upload a&nbsp;.gif, .webp, or .avif file below to convert it to a&nbsp;BTMA.</p>
+      <p class="hint" id="upload-label">Upload a&nbsp;.gif, .webp, .avif, .btma, or .btmw file below to convert it to a&nbsp;BTMA.</p>
+    </section>
+
+    <section id="upload-body">
       <div class="render-row" id="upload-render"></div>
       <div class="upload-controls">
-        <label>Image file: <input id="gif-input" type="file" accept="image/gif,image/webp,image/avif"></label>
-        <label>Beats per loop:
+        <label>Image file: <input id="gif-input" type="file" accept="image/gif,image/webp,image/avif,.btma,.btmw,.btmi"></label>
+        <label id="beat-length-label">Beats per loop:
           <select id="beat-length">
             <option value="auto" selected>auto-detect</option>
             <option value="0.5">0.5</option>
@@ -58,7 +56,7 @@
       <div class="instructions">
         <p><strong>Instructions:</strong></p>
         <ol>
-          <li>Pick a <code>.gif</code>, <code>.webp</code>, or <code>.avif</code> file from your computer.</li>
+          <li>Pick a <code>.gif</code>, <code>.webp</code>, <code>.avif</code>, <code>.btma</code>, or <code>.btmw</code> file from your computer.</li>
           <li>Use the dropdown to declare how many beats long the loop is.</li>
           <li>Press a play button above to start music. Your GIF will sync to the active track's tempo.</li>
         </ol>
